@@ -18,8 +18,11 @@ async function startServer() {
 
     await ConnectDB();
 
-    const server = app.listen(PORT, "127.0.0.1", () => {
-        console.log(`Server running on http://127.0.0.1:${PORT}`);
+    // On production (Render), bind to 0.0.0.0. Locally, bind to localhost
+    const HOST = process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1';
+    
+    const server = app.listen(PORT, HOST, () => {
+        console.log(`Server running on http://${HOST}:${PORT}`);
     });
 
     /*

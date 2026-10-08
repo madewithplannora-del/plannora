@@ -46,8 +46,8 @@ const allowedOrigins = [
     "http://127.0.0.1:5501",
     "http://127.0.0.1:3000",
     // Production
-    "https://plannora-vercel.vercel.app",
-    "https://plannora-protoype.onrender.com" // In case frontend calls backend directly
+    "https://plannora-delta.vercel.app",
+    "https://plannora-i3gu.onrender.com"
 ];
 
 app.use(cors({
