@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react'
+import API_URL from '../api/config'
 
 export function DebugPanel() {
   const [status, setStatus] = useState({
-    apiUrl: import.meta.env.VITE_API_URL || '(via Vite proxy)',
+    apiUrl: API_URL,
     frontendUrl: typeof window !== 'undefined' ? window.location.href : 'N/A',
     origin: typeof window !== 'undefined' ? window.location.origin : 'N/A',
     connectionTest: 'pending...',
@@ -13,7 +14,9 @@ export function DebugPanel() {
   useEffect(() => {
     async function testConnection() {
       try {
-        const response = await fetch(`/api/auth/me`, {
+        const testUrl = `${API_URL}/api/auth/me`
+        console.log('Testing connection to:', testUrl)
+        const response = await fetch(testUrl, {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',

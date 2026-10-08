@@ -1,8 +1,8 @@
-const API_URL = import.meta.env.VITE_API_URL || ''
+const API_URL = import.meta.env.VITE_API_URL || 'https://plannora-i3gu.onrender.com'
 
 // Log API URL for debugging
 if (typeof window !== 'undefined') {
-  console.log('API_URL configured as:', API_URL || '(relative paths - via proxy)')
+  console.log('API_URL configured as:', API_URL)
   console.log('VITE_API_URL env:', import.meta.env.VITE_API_URL)
 }
 
