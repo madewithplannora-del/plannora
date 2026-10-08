@@ -1,6 +1,7 @@
 const express = require("express");
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
+const helmet = require("helmet");
 
 const authroute = require("./routes/auth.route");
 const vendorprofileroute = require("./routes/vendorprofile.route");
@@ -60,6 +61,25 @@ app.use(express.urlencoded({
 }));
 
 app.use(cookieParser());
+
+// Security headers
+app.use(
+    helmet({
+        contentSecurityPolicy: {
+            directives: {
+                defaultSrc: ["'self'"],
+                frameAncestors: ["'none'"]
+            }
+        },
+        referrerPolicy: {
+            policy: "strict-origin-when-cross-origin"
+        },
+        hsts: {
+            maxAge: 31536000,
+            includeSubDomains: true
+        }
+    })
+);
 
 
 // Health check
