@@ -33,26 +33,52 @@ const trustProxy = process.env.TRUST_PROXY
 
 app.set("trust proxy", trustProxy);
 
-/*
-    CORS
-
-    Frontend origin will be added later once the frontend port/domain
-    is finalized.
-
-    credentials: true is required because the authentication system
-    uses cookies.
-*/
+// CORS configuration
+const allowedOrigins = [
+    // Localhost variants with different ports
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://localhost:5501",
+    "http://localhost:3000",
+    // 127.0.0.1 variants
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174",
+    "http://127.0.0.1:5501",
+    "http://127.0.0.1:3000",
+    // Production
+    "https://plannora-vercel.vercel.app",
+    "https://plannora-protoype.onrender.com" // In case frontend calls backend directly
+];
 
 app.use(cors({
+    origin: function(origin, callback) {
+        // Allow requests with no origin (like mobile apps, curl, or same-origin requests)
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            // Log for debugging
+            console.warn(`[CORS] Blocked origin: ${origin}`);
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
     credentials: true,
-
     exposedHeaders: [
         "Retry-After",
         "RateLimit-Limit",
         "RateLimit-Remaining",
         "RateLimit-Reset"
-    ]
+    ],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
+// Request logger middleware
+app.use((req, res, next) => {
+    if (process.env.NODE_ENV === 'development') {
+        console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+    }
+    next();
+});
 
 app.use(express.json());
 
@@ -86,6 +112,15 @@ app.use(
 app.get("/message", (req, res) => {
     res.status(200).json({
         status: "Alobuuuuu babyyyy"
+    });
+});
+
+// Simple test endpoint to verify connectivity
+app.get("/test", (req, res) => {
+    res.status(200).json({
+        success: true,
+        message: "Backend is working",
+        timestamp: new Date().toISOString()
     });
 });
 

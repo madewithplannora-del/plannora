@@ -88,9 +88,6 @@ async function createVendorProfile(req, res) {
             });
         }
 
-        // Check bloom filter for quick duplicate detection
-        const businessEmailInFilter = vendorEmailBloomFilter.has(rawBusinessEmail || Businessemail);
-        
         let logoUrl = "";
 
         // Handle profile picture upload if provided

@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>API Connection Test</title>
+  <style>
+    body { font-family: Arial; padding: 20px; }
+    .log { border: 1px solid #ccc; padding: 10px; margin: 10px 0; border-radius: 4px; background: #f9f9f9; }
+    .error { color: red; }
+    .success { color: green; }
+  </style>
+</head>
+<body>
+  <h1>Plannora API Connection Test</h1>
+  <div id="logs"></div>
+  
+  <script>
+    const logsDiv = document.getElementById('logs');
+    
+    function log(message, type = 'info') {
+      const div = document.createElement('div');
+      div.className = `log ${type}`;
+      div.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+      logsDiv.appendChild(div);
+      console.log(message);
+    }
+    
+    async function testConnection() {
+      log('Starting connection test...');
+      
+      const apiUrl = 'http://localhost:3000';
+      const endpoint = '/api/auth/me';
+      const fullUrl = apiUrl + endpoint;
+      
+      log(`API URL: ${apiUrl}`);
+      log(`Testing endpoint: ${fullUrl}`);
+      log(`Frontend origin: ${window.location.origin}`);
+      
+      try {
+        log(`Attempting fetch to ${fullUrl}...`);
+        
+        const response = await fetch(fullUrl, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          credentials: 'include',
+        });
+        
+        log(`Response status: ${response.status}`, response.ok ? 'success' : 'error');
+        
+        const responseHeaders = {
+          'Access-Control-Allow-Origin': response.headers.get('Access-Control-Allow-Origin'),
+          'Access-Control-Allow-Credentials': response.headers.get('Access-Control-Allow-Credentials'),
+        };
+        
+        log(`CORS Headers: ${JSON.stringify(responseHeaders)}`, 'success');
+        
+        try {
+          const data = await response.json();
+          log(`Response data: ${JSON.stringify(data)}`, response.ok ? 'success' : 'error');
+        } catch (e) {
+          const text = await response.text();
+          log(`Response (not JSON): ${text}`, response.ok ? 'success' : 'error');
+        }
+        
+      } catch (error) {
+        log(`Fetch error: ${error.message}`, 'error');
+        log(`Error type: ${error.constructor.name}`, 'error');
+        log(`Full error: ${JSON.stringify(error)}`, 'error');
+      }
+    }
+    
+    // Test on page load
+    window.addEventListener('load', testConnection);
+  </script>
+</body>
+</html>
