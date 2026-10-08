@@ -83,9 +83,9 @@ app.use(
 
 
 // Health check
-app.get("/health", (req, res) => {
+app.get("/message", (req, res) => {
     res.status(200).json({
-        status: "ok"
+        status: "Alobuuuuu babyyyy"
     });
 });
 
