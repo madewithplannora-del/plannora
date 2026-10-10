@@ -33,12 +33,17 @@ const userSchema = new mongoose.Schema({
         required: true
     },
 
-    vendorverified: {
+    twoFactor:{
+        type:Boolean,
+        default:false
+    },
+
+    emailverified: {
         type: Boolean,
         default: false
     },
 
-    emailverified: {
+    vendorverified: {
         type: Boolean,
         default: false
     }

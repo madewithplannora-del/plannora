@@ -1,40 +1,33 @@
 const nodemailer = require("nodemailer");
 require("dotenv").config();
 
-// Brevo SMTP transporter
-// Free tier: 300 emails/day, no credit card needed
-// Works on Render free tier - SMTP port 587 is accessible
 const transporter = nodemailer.createTransport({
-    host: "smtp-relay.brevo.com",
-    port: 587,
-    secure: false, // Use TLS, not SSL
+    service: "gmail",
     auth: {
-        user: process.env.BREVO_EMAIL || "noreply@plannora.com",
-        pass: process.env.BREVO_API_KEY
-    }
+        type: "OAuth2",
+        user: process.env.Email,
+        clientId: process.env.CLIENT_ID,
+        clientSecret: process.env.CLIENT_SECRET,
+        refreshToken: process.env.REFRESH_TOKEN,
+    },
 });
 
-async function sendmail(to, subject, text, html) {
+async function sendEmail(to, subject, text, html) {
     try {
-        if (!process.env.BREVO_API_KEY) {
-            throw new Error("BREVO_API_KEY is not configured in environment variables");
-        }
-
         const info = await transporter.sendMail({
-            from: process.env.EMAIL_FROM || "noreply@plannora.com",
+            from: process.env.GOOGLE_EMAIL_ID,
             to,
             subject,
             text,
-            html
+            html,
         });
 
-        console.log("Email sent via Brevo:", info.messageId);
+        console.log("Email sent:", info.messageId);
         return info;
-
     } catch (error) {
-        console.error("Email sending error:", error.message);
+        console.error("Email Error:", error);
         throw error;
     }
 }
 
-module.exports = sendmail;
+module.exports = sendEmail; 

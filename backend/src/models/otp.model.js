@@ -14,14 +14,6 @@ const otpSchema = new mongoose.Schema({
         required: true
     },
 
-    /*
-        Pending registration data.
-        The permanent account is only
-        created after the OTP is
-        verified, so the registration
-        details live here temporarily.
-    */
-
     username: {
         type: String
     },

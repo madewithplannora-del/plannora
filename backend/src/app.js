@@ -9,6 +9,7 @@ require("dotenv").config();
 const authroute = require("./routes/auth.route");
 const vendorprofileroute = require("./routes/vendorprofile.route");
 const bloomfilteradminroute = require("./routes/bloomfilter.admin.route");
+const autoRefreshMiddleware = require("./middlewares/autorefresh.middleware");
 
 const app = express();
 
@@ -25,10 +26,27 @@ const trustProxy = process.env.TRUST_PROXY
 
 app.set("trust proxy", trustProxy);
 
-// CORS configuration: no frontend origins configured
+// CORS configuration: Allow frontend origins
 app.use(cors({
     origin: (origin, callback) => {
+        // Allow no origin (mobile apps, curl requests)
         if (!origin) {
+            return callback(null, true);
+        }
+
+        // Allow all origins in development
+        if (process.env.NODE_ENV === "development") {
+            return callback(null, true);
+        }
+
+        // In production, allow specific origins
+        const allowedOrigins = [
+            "https://plannora-delta.vercel.app",
+            "http://localhost:5173",
+            "http://localhost:3000"
+        ];
+
+        if (allowedOrigins.includes(origin)) {
             return callback(null, true);
         }
 
@@ -64,6 +82,9 @@ app.use(express.urlencoded({
 }));
 
 app.use(cookieParser());
+
+// Auto-refresh expired access tokens
+app.use(autoRefreshMiddleware);
 
 // Security headers
 app.use(

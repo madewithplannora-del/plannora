@@ -34,4 +34,17 @@ router.post("/refresh",ratelimiter.ApiRateLimiter,authcontroller.refreshAccessTo
 // Current logged in user (called on page load, so it must stay lenient too)
 router.get("/me",ratelimiter.ApiRateLimiter,authcontroller.getMe);
 
+// Two-Factor Authentication Routes
+// Enable 2FA - send setup OTP
+router.post("/enable2fa",ratelimiter.AuthRateLimiter,authcontroller.enable2FA);
+
+// Verify 2FA setup OTP
+router.post("/verify2fasetup",ratelimiter.AuthRateLimiter,authcontroller.verify2FASetup);
+
+// Disable 2FA
+router.post("/disable2fa",ratelimiter.AuthRateLimiter,authcontroller.disable2FA);
+
+// Verify 2FA login OTP
+router.post("/verify2falogin",ratelimiter.AuthRateLimiter,authcontroller.verify2FALogin);
+
 module.exports = router;

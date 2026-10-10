@@ -4,7 +4,7 @@ const mongoose = require("mongoose");
 const authdatabase = require("../models/auth.model");
 const otpmodel = require("../models/otp.model");
 const forgototp = require("../models/forgototp.model");
-const refreshTokenModel = require("../models/refreshToken.model");
+
 
 //hashing and tokens
 const jwt = require("jsonwebtoken");
@@ -12,24 +12,15 @@ const bcrypt = require("bcrypt");
 const crypto = require("crypto");
 
 const sendmail = require("../services/email.service");
-//const sendmail = require("../services/resend.service")
+
 const { generateOtp, getOtpMsg } = require("../utils/util");
 const { emailBloomFilter, usernameBloomFilter } = require("../utils/bloomfilter");
+const twoFactorOtpModel = require("../models/twofactorotp.model");
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 require("dotenv").config();
 
-/*
-    Shared auth cookie settings.
-
-    `secure` is only switched on in production: a browser refuses to store a
-    Secure cookie over plain http, so leaving it on during local development
-    makes login look like it worked while the cookie is silently dropped.
-
-    sameSite "none" is what allows the deployed frontend (a different origin)
-    to send these cookies; "lax" is enough locally, and is the safer default.
-*/
 const isProduction = process.env.NODE_ENV === "production";
 
 const cookieSecurity = {
@@ -304,19 +295,6 @@ async function verifyOtp(req, res) {
 
     const refreshtoken = crypto.randomBytes(64).toString("hex");
 
-    const tokenHash = crypto
-        .createHash("sha256")
-        .update(refreshtoken)
-        .digest("hex");
-
-    await refreshTokenModel.create({
-        userId: user._id,
-        tokenHash,
-        expiresAt: new Date(
-            Date.now() + 7 * 24 * 60 * 60 * 1000
-        )
-    });
-
     res.cookie(
         "accesstoken",
         accesstoken,
@@ -353,7 +331,257 @@ async function verifyOtp(req, res) {
     }
 }
 
-// Login
+async function enable2FA(req, res) {
+    try {
+        const token = req.cookies.accesstoken;
+
+        if (!token) {
+            return res.status(401).json({
+                message: "Access token not found"
+            });
+        }
+
+        let decoded;
+
+        try {
+            decoded = jwt.verify(
+                token,
+                process.env.JWT_KEY
+            );
+        } catch (error) {
+            return res.status(401).json({
+                message: "Invalid or expired access token"
+            });
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(decoded.id)) {
+            return res.status(401).json({
+                message: "Invalid or expired access token"
+            });
+        }
+
+        const user = await authdatabase.findById(decoded.id);
+
+        if (!user) {
+            return res.status(404).json({
+                message: "User not found"
+            });
+        }
+
+        // Generate OTP for 2FA setup verification
+        const otp = generateOtp();
+
+        const hashedOtp = await bcrypt.hash(
+            otp.toString(),
+            10
+        );
+
+        // Store OTP for verification
+        await twoFactorOtpModel.deleteMany({ userId: user._id });
+
+        await twoFactorOtpModel.create({
+            userId: user._id,
+            email: user.email,
+            otp: hashedOtp,
+            attempts: 0
+        });
+
+        const message = getOtpMsg(otp);
+
+        await sendmail(
+            user.email,
+            "Two-Factor Authentication Setup",
+            message.text,
+            message.html
+        );
+
+        return res.status(200).json({
+            message: "OTP sent to email. Verify it to enable 2FA."
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            message: "Error while enabling 2FA",
+            ...(process.env.NODE_ENV !== "production" && {
+                error: error.message
+            })
+        });
+    }
+}
+
+// Verify 2FA setup OTP and enable 2FA
+async function verify2FASetup(req, res) {
+    try {
+        const { otp } = req.body;
+        const token = req.cookies.accesstoken;
+
+        if (!token) {
+            return res.status(401).json({
+                message: "Access token not found"
+            });
+        }
+
+        let decoded;
+
+        try {
+            decoded = jwt.verify(
+                token,
+                process.env.JWT_KEY
+            );
+        } catch (error) {
+            return res.status(401).json({
+                message: "Invalid or expired access token"
+            });
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(decoded.id)) {
+            return res.status(401).json({
+                message: "Invalid or expired access token"
+            });
+        }
+
+        if (!otp) {
+            return res.status(400).json({
+                message: "OTP is required"
+            });
+        }
+
+        const otpData = await twoFactorOtpModel.findOne({
+            userId: decoded.id
+        });
+
+        if (!otpData) {
+            return res.status(404).json({
+                message: "OTP not found or expired"
+            });
+        }
+
+        const createdAtMs = otpData.createdAt ? new Date(otpData.createdAt).getTime() : 0;
+        const otpAge = Date.now() - createdAtMs;
+
+        if (otpAge > 10 * 60 * 1000) {
+            await twoFactorOtpModel.deleteOne({
+                _id: otpData._id
+            });
+
+            return res.status(400).json({
+                message: "OTP expired"
+            });
+        }
+
+        if (otpData.attempts >= 5) {
+            await twoFactorOtpModel.deleteOne({
+                _id: otpData._id
+            });
+
+            return res.status(429).json({
+                message: "Too many invalid attempts. Try enabling 2FA again."
+            });
+        }
+
+        const otpMatch = await bcrypt.compare(
+            String(otp),
+            otpData.otp
+        );
+
+        if (!otpMatch) {
+            otpData.attempts += 1;
+            await otpData.save();
+
+            return res.status(400).json({
+                message: "Invalid OTP"
+            });
+        }
+
+        // Enable 2FA for user
+        const user = await authdatabase.findById(decoded.id);
+
+        if (!user) {
+            return res.status(404).json({
+                message: "User not found"
+            });
+        }
+
+        user.twoFactor = true;
+        await user.save();
+
+        await twoFactorOtpModel.deleteOne({
+            _id: otpData._id
+        });
+
+        return res.status(200).json({
+            message: "Two-Factor Authentication enabled successfully"
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            message: "Error while verifying 2FA setup",
+            ...(process.env.NODE_ENV !== "production" && {
+                error: error.message
+            })
+        });
+    }
+}
+
+// Disable 2FA
+async function disable2FA(req, res) {
+    try {
+        const token = req.cookies.accesstoken;
+
+        if (!token) {
+            return res.status(401).json({
+                message: "Access token not found"
+            });
+        }
+
+        let decoded;
+
+        try {
+            decoded = jwt.verify(
+                token,
+                process.env.JWT_KEY
+            );
+        } catch (error) {
+            return res.status(401).json({
+                message: "Invalid or expired access token"
+            });
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(decoded.id)) {
+            return res.status(401).json({
+                message: "Invalid or expired access token"
+            });
+        }
+
+        const user = await authdatabase.findById(decoded.id);
+
+        if (!user) {
+            return res.status(404).json({
+                message: "User not found"
+            });
+        }
+
+        user.twoFactor = false;
+        await user.save();
+
+        // Clean up any pending 2FA OTPs
+        await twoFactorOtpModel.deleteMany({ userId: user._id });
+
+        return res.status(200).json({
+            message: "Two-Factor Authentication disabled successfully"
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            message: "Error while disabling 2FA",
+            ...(process.env.NODE_ENV !== "production" && {
+                error: error.message
+            })
+        });
+    }
+}
+
+// Login step 1: Verify credentials and send 2FA OTP if enabled
 async function loginUser(req, res) {
 
     try {
@@ -402,52 +630,99 @@ async function loginUser(req, res) {
             });
         }
 
+        // Check if 2FA is enabled
+        if (userExist.twoFactor) {
+            // Generate and send 2FA OTP
+            const otp = generateOtp();
+
+            const hashedOtp = await bcrypt.hash(
+                otp.toString(),
+                10
+            );
+
+            // Delete old 2FA OTP if exists
+            await twoFactorOtpModel.deleteMany({ userId: userExist._id });
+
+            await twoFactorOtpModel.create({
+                userId: userExist._id,
+                email: userExist.email,
+                otp: hashedOtp,
+                attempts: 0
+            });
+
+            const message = getOtpMsg(otp);
+
+            await sendmail(
+                userExist.email,
+                "Your Two-Factor Authentication Code",
+                message.text,
+                message.html
+            );
+
+            // Store temporary login token (expires in 5 minutes)
+            const loginToken = jwt.sign(
+                {
+                    id: userExist._id,
+                    username: userExist.username,
+                    purpose: "2fa-login"
+                },
+                process.env.JWT_KEY,
+                {
+                    expiresIn: "5m"
+                }
+            );
+
+            res.cookie(
+                "logintoken",
+                loginToken,
+                {
+                    ...cookieSecurity,
+                    path: "/",
+                    maxAge: 5 * 60 * 1000
+                }
+            );
+
+            return res.status(200).json({
+                message: "2FA OTP sent to your email",
+                requires2FA: true
+            });
+        }
+
+        // 2FA not enabled, proceed with normal login
         const accesstoken = jwt.sign(
-    {
-        username: userExist.username,
-        id: userExist._id,
-        role: userExist.role
-    },
-    process.env.JWT_KEY,
-    {
-        expiresIn: "15m"
-    }
-);
+            {
+                username: userExist.username,
+                id: userExist._id,
+                role: userExist.role
+            },
+            process.env.JWT_KEY,
+            {
+                expiresIn: "15m"
+            }
+        );
 
-const refreshtoken = crypto.randomBytes(64).toString("hex");
+        const refreshtoken = crypto.randomBytes(64).toString("hex");
 
-const tokenHash = crypto
-    .createHash("sha256")
-    .update(refreshtoken)
-    .digest("hex");
+        res.cookie(
+            "accesstoken",
+            accesstoken,
+            {
+                ...cookieSecurity,
+                path: "/",
+                maxAge: 15 * 60 * 1000
+            }
+        );
 
-await refreshTokenModel.create({
-    userId: userExist._id,
-    tokenHash,
-    expiresAt: new Date(
-        Date.now() + 7 * 24 * 60 * 60 * 1000
-    )
-});
+        res.cookie(
+            "refreshtoken",
+            refreshtoken,
+            {
+                ...cookieSecurity,
+                path: "/api/auth",
+                maxAge: 7 * 24 * 60 * 60 * 1000
+            }
+        );
 
-res.cookie(
-    "accesstoken",
-    accesstoken,
-    {
-        ...cookieSecurity,
-        path: "/",
-        maxAge: 15 * 60 * 1000
-    }
-);
-
-res.cookie(
-    "refreshtoken",
-    refreshtoken,
-    {
-        ...cookieSecurity,
-        path: "/api/auth",
-        maxAge: 7 * 24 * 60 * 60 * 1000
-    }
-);
         return res.status(200).json({
             message: "Logged in"
         });
@@ -709,11 +984,6 @@ async function resetPassword(req, res) {
 
         await user.save();
 
-        // Revoke all existing sessions for this user upon password reset
-        await refreshTokenModel.deleteMany({
-            userId: user._id
-        });
-
         res.clearCookie(
             "resettoken",
             {
@@ -742,57 +1012,45 @@ async function resetPassword(req, res) {
 async function logoutUser(req, res) {
 
     /*
-        Revoke the stored refresh token. Without this it stays usable for its
-        full 7 day lifetime even though the user has logged out.
+        Clear authentication cookies.
     */
     try {
 
-        const refreshtoken = req.cookies.refreshtoken;
+        // Clear access token
+        res.clearCookie("accesstoken", {
+            ...cookieSecurity,
+            path: "/"
+        });
 
-        if (refreshtoken) {
+        // Clear refresh token
+        res.clearCookie("refreshtoken", {
+            ...cookieSecurity,
+            path: "/api/auth"
+        });
 
-            const tokenHash = crypto
-                .createHash("sha256")
-                .update(refreshtoken)
-                .digest("hex");
+        // Clear password reset token
+        res.clearCookie("resettoken", {
+            ...cookieSecurity,
+            path: "/"
+        });
 
-            await refreshTokenModel.deleteOne({
-                tokenHash
-            });
-
-        }
+        return res.status(200).json({
+            message: "Logged out successfully"
+        });
 
     } catch (error) {
 
-        console.error("Failed to revoke refresh token:", error.message);
+        console.error("Logout error:", error.message);
+
+        return res.status(500).json({
+            message: "Error while logging out"
+        });
 
     }
 
-    // Clear access token
-    res.clearCookie("accesstoken", {
-        ...cookieSecurity,
-        path: "/"
-    });
-
-    // Clear refresh token
-    res.clearCookie("refreshtoken", {
-        ...cookieSecurity,
-        path: "/api/auth"
-    });
-
-    // Clear password reset token
-    res.clearCookie("resettoken", {
-        ...cookieSecurity,
-        path: "/"
-    });
-
-    return res.status(200).json({
-        message: "Logged out successfully"
-    });
-
 }
 
-async function getMe(req, res) {
+async function getMe(req, res) { 
 
     try {
 
@@ -845,7 +1103,8 @@ async function getMe(req, res) {
                 email: user.email,
                 role: user.role,
                 emailverified: user.emailverified,
-                vendorverified: user.vendorverified
+                vendorverified: user.vendorverified,
+                twoFactor: user.twoFactor
             }
         });
 
@@ -860,10 +1119,6 @@ async function getMe(req, res) {
 
 }
 
-/*
-    Exchanges a valid refresh cookie for a new access token. The cookie is
-    scoped to this exact path, so it only ever reaches this handler.
-*/
 async function refreshAccessToken(req, res) {
 
     try {
@@ -876,32 +1131,21 @@ async function refreshAccessToken(req, res) {
             });
         }
 
-        const tokenHash = crypto
-            .createHash("sha256")
-            .update(refreshtoken)
-            .digest("hex");
+        const userIdFromRefreshToken = req.cookies.accesstoken ? 
+            jwt.verify(req.cookies.accesstoken, process.env.JWT_KEY, { ignoreExpiration: true }).id 
+            : null;
 
-        const storedToken = await refreshTokenModel.findOne({
-            tokenHash
-        });
-
-        if (
-            !storedToken ||
-            storedToken.revokedAt ||
-            storedToken.expiresAt.getTime() < Date.now()
-        ) {
+        if (!userIdFromRefreshToken) {
             return res.status(401).json({
-                message: "Refresh token is invalid or expired"
+                message: "Invalid refresh token"
             });
         }
 
-        const user = await authdatabase.findById(
-            storedToken.userId
-        );
+        const user = await authdatabase.findById(userIdFromRefreshToken);
 
         if (!user) {
             return res.status(401).json({
-                message: "Refresh token is invalid or expired"
+                message: "User not found"
             });
         }
 
@@ -991,16 +1235,172 @@ async function googleauth(req, res) {
 
 }
 
+// Verify 2FA login OTP
+async function verify2FALogin(req, res) {
+    try {
+        const { otp } = req.body;
+        const loginToken = req.cookies.logintoken;
+
+        if (!loginToken) {
+            return res.status(401).json({
+                message: "Login token not found. Please login first."
+            });
+        }
+
+        let decoded;
+
+        try {
+            decoded = jwt.verify(
+                loginToken,
+                process.env.JWT_KEY
+            );
+        } catch (error) {
+            return res.status(401).json({
+                message: "Login token expired. Please login again."
+            });
+        }
+
+        if (decoded.purpose !== "2fa-login") {
+            return res.status(401).json({
+                message: "Invalid login token"
+            });
+        }
+
+        if (!otp) {
+            return res.status(400).json({
+                message: "OTP is required"
+            });
+        }
+
+        const otpData = await twoFactorOtpModel.findOne({
+            userId: decoded.id
+        });
+
+        if (!otpData) {
+            return res.status(404).json({
+                message: "OTP not found or expired"
+            });
+        }
+
+        const createdAtMs = otpData.createdAt ? new Date(otpData.createdAt).getTime() : 0;
+        const otpAge = Date.now() - createdAtMs;
+
+        if (otpAge > 10 * 60 * 1000) {
+            await twoFactorOtpModel.deleteOne({
+                _id: otpData._id
+            });
+
+            return res.status(400).json({
+                message: "OTP expired"
+            });
+        }
+
+        if (otpData.attempts >= 5) {
+            await twoFactorOtpModel.deleteOne({
+                _id: otpData._id
+            });
+
+            return res.status(429).json({
+                message: "Too many invalid attempts. Please login again."
+            });
+        }
+
+        const otpMatch = await bcrypt.compare(
+            String(otp),
+            otpData.otp
+        );
+
+        if (!otpMatch) {
+            otpData.attempts += 1;
+            await otpData.save();
+
+            return res.status(400).json({
+                message: "Invalid OTP"
+            });
+        }
+
+        const user = await authdatabase.findById(decoded.id);
+
+        if (!user) {
+            return res.status(404).json({
+                message: "User not found"
+            });
+        }
+
+        // Clean up 2FA OTP
+        await twoFactorOtpModel.deleteOne({
+            _id: otpData._id
+        });
+
+        // Create access and refresh tokens
+        const accesstoken = jwt.sign(
+            {
+                username: user.username,
+                id: user._id,
+                role: user.role
+            },
+            process.env.JWT_KEY,
+            {
+                expiresIn: "15m"
+            }
+        );
+
+        const refreshtoken = crypto.randomBytes(64).toString("hex");
+
+        res.cookie(
+            "accesstoken",
+            accesstoken,
+            {
+                ...cookieSecurity,
+                path: "/",
+                maxAge: 15 * 60 * 1000
+            }
+        );
+
+        res.cookie(
+            "refreshtoken",
+            refreshtoken,
+            {
+                ...cookieSecurity,
+                path: "/api/auth",
+                maxAge: 7 * 24 * 60 * 60 * 1000
+            }
+        );
+
+        // Clear login token
+        res.clearCookie("logintoken", {
+            ...cookieSecurity,
+            path: "/"
+        });
+
+        return res.status(200).json({
+            message: "Logged in successfully with 2FA"
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            message: "Error while verifying 2FA login",
+            ...(process.env.NODE_ENV !== "production" && {
+                error: error.message
+            })
+        });
+    }
+}
+
 module.exports = {
     registerUser,
     verifyOtp,
     loginUser,
+    verify2FALogin,
     logoutUser,
     forgotPassword,
     verifyForgotOtp,
     resetPassword,
     getMe,
     refreshAccessToken,
+    enable2FA,
+    verify2FASetup,
+    disable2FA,
     googleauth
 };
 
