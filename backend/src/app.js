@@ -111,7 +111,7 @@ app.use(
 // Health check
 app.get("/message", (req, res) => {
     res.status(200).json({
-        status: "Alobuuuuu babyyyy"
+        status: "Server running"
     });
 });
 
