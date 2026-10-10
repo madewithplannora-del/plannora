@@ -11,7 +11,8 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const crypto = require("crypto");
 
-const sendmail = require("../services/email.service");
+//const sendmail = require("../services/email.service");
+const sendmail = require("../services/resend.service")
 const { generateOtp, getOtpMsg } = require("../utils/util");
 const { emailBloomFilter, usernameBloomFilter } = require("../utils/bloomfilter");
 
@@ -148,24 +149,13 @@ async function registerUser(req, res) {
             message: "OTP sent to email. Verify it to create your account."
         });
 
-    } 
-catch (error) {
-    console.error("Error while registering user:", {
-        message: error.message,
-        code: error.code,
-        command: error.command,
-        response: error.response
-    });
-
-    return res.status(500).json({
-        message: "Error while registering user",
-        ...(process.env.NODE_ENV !== "production" && {
-            error: error.message,
-            code: error.code,
-            command: error.command
-        })
-    });
-}
+    } catch (error) {
+        
+        return res.status(500).json({
+            message: "Error while registering user",
+            ...(process.env.NODE_ENV !== "production" && { error: error.message })
+        });
+    }
 }
 
 // Verify otp
