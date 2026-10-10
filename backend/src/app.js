@@ -91,6 +91,13 @@ app.get("/health", (req, res) => {
     });
 });
 
+//start route
+app.get("/",(req,res)=>{
+    res.status(200).json({
+        status:"ok"
+    })
+})
+
 // Connectivity test
 app.get("/test", (req, res) => {
     res.status(200).json({
