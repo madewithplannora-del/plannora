@@ -1,17 +1,23 @@
-const { Resend } = require("resend");
+
 require("dotenv").config();
 
-// Initialize Resend with API key
-const resend = new Resend(process.env.RESEND_API_KEY);
+const apiKey = process.env.RESEND_API_KEY;
+const emailFrom =
+    process.env.EMAIL_FROM || "Plannora <onboarding@resend.dev>";
+
+if (!apiKey) {
+    throw new Error(
+        "RESEND_API_KEY is missing. Configure it in Render Environment."
+    );
+}
+
+const { Resend } = require("resend");
+const resend = new Resend(apiKey);
 
 async function sendmail(to, subject, text, html) {
     try {
-        if (!process.env.RESEND_API_KEY) {
-            throw new Error("RESEND_API_KEY is not configured in environment variables");
-        }
-
         const { data, error } = await resend.emails.send({
-            from: process.env.EMAIL_FROM || "Plannora <onboarding@resend.dev>",
+            from: emailFrom,
             to: [to],
             subject,
             text,
@@ -20,13 +26,13 @@ async function sendmail(to, subject, text, html) {
 
         if (error) {
             console.error("Resend email error:", error.message);
-            throw new Error("Failed to send email: " + error.message);
+            throw new Error("Resend rejected the email request");
         }
 
-        console.log("Email sent via Resend:", data.id);
+        console.log("Resend accepted email:", data.id);
         return data;
     } catch (error) {
-        console.error("Email service error:", error.message);
+        console.error("Email service failed:", error.message);
         throw error;
     }
 }
