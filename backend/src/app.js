@@ -91,7 +91,7 @@ app.get("/health", (req, res) => {
     });
 });
 
-//start route
+//start route(cron job)
 app.get("/",(req,res)=>{
     res.status(200).json({
         status:"ok"
