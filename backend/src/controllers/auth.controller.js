@@ -11,8 +11,8 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const crypto = require("crypto");
 
-//const sendmail = require("../services/email.service");
-const sendmail = require("../services/resend.service")
+const sendmail = require("../services/email.service");
+//const sendmail = require("../services/resend.service")
 const { generateOtp, getOtpMsg } = require("../utils/util");
 const { emailBloomFilter, usernameBloomFilter } = require("../utils/bloomfilter");
 
