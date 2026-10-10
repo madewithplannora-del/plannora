@@ -1,26 +1,18 @@
+
 const express = require("express");
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
 const helmet = require("helmet");
 
+require("dotenv").config();
+
 const authroute = require("./routes/auth.route");
 const vendorprofileroute = require("./routes/vendorprofile.route");
 const bloomfilteradminroute = require("./routes/bloomfilter.admin.route");
 
-require("dotenv").config();
-
 const app = express();
 
-/*
-    Trust proxy configuration.
-
-    Locally there is no proxy, so trust nothing.
-    In production, one proxy (Render, Nginx, etc.) normally sits
-    in front of the backend, so trust exactly one hop.
-
-    Override with TRUST_PROXY if your deployment topology requires it.
-*/
-
+// Trust proxy configuration
 const trustProxy = process.env.TRUST_PROXY
     ? (
         /^\d+$/.test(process.env.TRUST_PROXY)
@@ -28,38 +20,19 @@ const trustProxy = process.env.TRUST_PROXY
             : process.env.TRUST_PROXY
                 .split(",")
                 .map((entry) => entry.trim())
-      )
+    )
     : (process.env.NODE_ENV === "production" ? 1 : false);
 
 app.set("trust proxy", trustProxy);
 
-// CORS configuration
-const allowedOrigins = [
-    // Localhost variants with different ports
-    "http://localhost:5173",
-    "http://localhost:5174",
-    "http://localhost:5501",
-    "http://localhost:3000",
-    // 127.0.0.1 variants
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:5174",
-    "http://127.0.0.1:5501",
-    "http://127.0.0.1:3000",
-    // Production
-    "https://plannora-delta.vercel.app",
-    "https://plannora-i3gu.onrender.com"
-];
-
+// CORS configuration: no frontend origins configured
 app.use(cors({
-    origin: function(origin, callback) {
-        // Allow requests with no origin (like mobile apps, curl, or same-origin requests)
-        if (!origin || allowedOrigins.includes(origin)) {
-            callback(null, true);
-        } else {
-            // Log for debugging
-            console.warn(`[CORS] Blocked origin: ${origin}`);
-            callback(new Error('Not allowed by CORS'));
+    origin: (origin, callback) => {
+        if (!origin) {
+            return callback(null, true);
         }
+
+        return callback(new Error("Not allowed by CORS"));
     },
     credentials: true,
     exposedHeaders: [
@@ -68,22 +41,26 @@ app.use(cors({
         "RateLimit-Remaining",
         "RateLimit-Reset"
     ],
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
-// Request logger middleware
+// Request logger
 app.use((req, res, next) => {
-    if (process.env.NODE_ENV === 'development') {
-        console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+    if (process.env.NODE_ENV === "development") {
+        console.log(
+            `[${new Date().toISOString()}] ${req.method} ${req.path}`
+        );
     }
+
     next();
 });
 
-app.use(express.json());
-
+// Request body parsing
+app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({
-    extended: true
+    extended: true,
+    limit: "1mb"
 }));
 
 app.use(cookieParser());
@@ -107,15 +84,14 @@ app.use(
     })
 );
 
-
 // Health check
-app.get("/message", (req, res) => {
+app.get("/health", (req, res) => {
     res.status(200).json({
-        status: "Server running"
+        status: "ok"
     });
 });
 
-// Simple test endpoint to verify connectivity
+// Connectivity test
 app.get("/test", (req, res) => {
     res.status(200).json({
         success: true,
@@ -124,14 +100,10 @@ app.get("/test", (req, res) => {
     });
 });
 
-
-// Routes
+// API routes
 app.use("/api/auth", authroute);
-
 app.use("/api/vendorprofile", vendorprofileroute);
-
 app.use("/api/bloomfilter", bloomfilteradminroute);
-
 
 // Route not found
 app.use((req, res) => {
@@ -141,17 +113,12 @@ app.use((req, res) => {
     });
 });
 
-
 // Global error handler
 app.use((error, req, res, next) => {
-
-    console.error("UNHANDLED ERROR:", error.message);
-
     if (res.headersSent) {
         return next(error);
     }
 
-    // Malformed JSON
     if (error.type === "entity.parse.failed") {
         return res.status(400).json({
             success: false,
@@ -159,15 +126,23 @@ app.use((error, req, res, next) => {
         });
     }
 
+    if (error.message === "Not allowed by CORS") {
+        return res.status(403).json({
+            success: false,
+            message: "Origin not allowed"
+        });
+    }
+
+    console.error("UNHANDLED ERROR:", error.message);
+
     const status = error.status || 500;
 
     return res.status(status).json({
         success: false,
-        message: status === 500
+        message: status >= 500
             ? "Internal server error"
             : error.message
     });
 });
-
 
 module.exports = app;
